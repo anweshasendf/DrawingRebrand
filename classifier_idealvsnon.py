@@ -116,21 +116,39 @@ def load_image_paths(image_dir):
 
 def filter_detections(result, confidence_threshold):
     filtered_boxes = []
-    if result.boxes is not None:
-        for i, conf in enumerate(result.boxes.conf):
-            if conf > confidence_threshold:
-                box_coords = result.boxes.xyxy[i].cpu().numpy()
-                class_label = int(result.boxes.cls[i])
+    if result.boxes is not None:  # Change 'result.boxes' to 'result.xyxy'
+        for i, det in enumerate(result.boxes):
+            if result.probs is not None and i < len(result.probs):  # Check if result.probs is not None and i is within bounds
+                conf = result.probs[i]  # Confidence score
+                if conf > confidence_threshold:
+                    box_coords = result.orig_shape.cpu().numpy()
+                    class_label = result.names[i]
                 filtered_boxes.append({"class": class_label, "confidence": conf.item(), "coords": box_coords})
     return filtered_boxes
+
+# def save_results(image, output_path, filtered_boxes, csv_output_path, image_name):
+#     cv2.imwrite(output_path, image)
+#     with open(csv_output_path, mode='a', newline='') as csv_file:
+#         csv_writer = csv.writer(csv_file)
+#         for box in filtered_boxes:
+#             csv_writer.writerow([image_name, len(filtered_boxes), box["confidence"], box["class"], "Replaced"])
 
 def save_results(image, output_path, filtered_boxes, csv_output_path, image_name):
     cv2.imwrite(output_path, image)
     with open(csv_output_path, mode='a', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         for box in filtered_boxes:
-            csv_writer.writerow([image_name, len(filtered_boxes), box["confidence"], box["class"], "Replaced"])
-
+            x_center = (box["coords"][0] + box["coords"][2]) / 2
+            y_center = (box["coords"][1] + box["coords"][3]) / 2
+            width = box["coords"][2] - box["coords"][0]
+            height = box["coords"][3] - box["coords"][1]
+            csv_writer.writerow([image_name, box["class"], x_center, y_center, width, height])
+            
+            # Create annotation .txt file
+            txt_filename = os.path.splitext(image_name)[0] + ".txt"
+            txt_path = os.path.join(os.path.dirname(image_name), txt_filename)
+            with open(txt_path, 'a') as txt_file:
+                txt_file.write(f"{box['class']} {x_center} {y_center} {width} {height}\n")
 def main():
     current_directory = os.getcwd()
     model_path = r"C:\Users\U436445\OneDrive - Danfoss\Documents\Codes\DrawingRebrand\AI_Drawing_Rebranding\version_2\runs\detect\train4\weights\best.pt"
@@ -157,7 +175,7 @@ def main():
             continue
 
         results = model(image_path)
-        filtered_boxes = filter_detections(results[0], confidence_threshold=0.5)
+        filtered_boxes = filter_detections(results[0], confidence_threshold=0.3)
         if not filtered_boxes:
             print(f"No detections above confidence threshold in image {image_path}")
             continue
