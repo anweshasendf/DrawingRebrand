@@ -94,11 +94,20 @@ from ultralytics import YOLO
 from os.path import basename, join
 from os import makedirs
 from typing import List
+from PIL import Image
+from ultralytics import YOLO
+from os.path import basename, join
+from os import makedirs
+from typing import List
+import csv
+import cv2
+import numpy as np
+import textwrap
 
 # Load pre-trained YOLOv8 model
 #model = torch.hub.load('ultralytics/yolov8', 'yolov8m', pretrained=True) #Change with actual model
 # Load the locally stored YOLOv8 model
-model_path = r"C:\Users\U436445\OneDrive - Danfoss\Documents\Codes\DrawingRebrand\AI_Drawing_Rebranding\version_2\runs\detect\train4\weights\best.pt"
+model_path = r"C:\Users\U436445\OneDrive - Danfoss\Documents\GitHub\DrawingRebrand\best.pt"
 model = YOLO(model_path) 
 import os
 import csv
@@ -116,14 +125,12 @@ def load_image_paths(image_dir):
 
 def filter_detections(result, confidence_threshold):
     filtered_boxes = []
-    if result.boxes is not None:  # Change 'result.boxes' to 'result.xyxy'
-        for i, det in enumerate(result.boxes):
-            if result.probs is not None and i < len(result.probs):  # Check if result.probs is not None and i is within bounds
-                conf = result.probs[i]  # Confidence score
-                if conf > confidence_threshold:
-                    box_coords = result.orig_shape.cpu().numpy()
-                    class_label = result.names[i]
-                filtered_boxes.append({"class": class_label, "confidence": conf.item(), "coords": box_coords})
+    for det in result.boxes:
+        conf = det.conf.item()
+        if conf > confidence_threshold:
+            box_coords = det.xyxy[0].cpu().numpy()
+            class_label = result.names[int(det.cls)]
+            filtered_boxes.append({"class": class_label, "confidence": conf, "coords": box_coords})
     return filtered_boxes
 
 # def save_results(image, output_path, filtered_boxes, csv_output_path, image_name):
@@ -133,26 +140,39 @@ def filter_detections(result, confidence_threshold):
 #         for box in filtered_boxes:
 #             csv_writer.writerow([image_name, len(filtered_boxes), box["confidence"], box["class"], "Replaced"])
 
+def get_class_id(class_name):
+    class_map = {
+        'logo': 0,
+        'division': 1,
+        'ip_note': 2,
+        'obsolete': 3
+    }
+    return class_map.get(class_name, -1)  # Returns -1 if class not found
+
+
 def save_results(image, output_path, filtered_boxes, csv_output_path, image_name):
     cv2.imwrite(output_path, image)
+    img_height, img_width = image.shape[:2]
     with open(csv_output_path, mode='a', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         for box in filtered_boxes:
-            x_center = (box["coords"][0] + box["coords"][2]) / 2
-            y_center = (box["coords"][1] + box["coords"][3]) / 2
-            width = box["coords"][2] - box["coords"][0]
-            height = box["coords"][3] - box["coords"][1]
+            x_center = (box["coords"][0] + box["coords"][2]) / 2 / img_width
+            y_center = (box["coords"][1] + box["coords"][3]) / 2 / img_height
+            width = (box["coords"][2] - box["coords"][0]) / img_width
+            height = (box["coords"][3] - box["coords"][1]) / img_height
             csv_writer.writerow([image_name, box["class"], x_center, y_center, width, height])
             
             # Create annotation .txt file
             txt_filename = os.path.splitext(image_name)[0] + ".txt"
-            txt_path = os.path.join(os.path.dirname(image_name), txt_filename)
+            txt_path = os.path.join(os.path.dirname(output_path), txt_filename)
             with open(txt_path, 'a') as txt_file:
-                txt_file.write(f"{box['class']} {x_center} {y_center} {width} {height}\n")
+                class_id = get_class_id(box["class"])
+                txt_file.write(f"{class_id} {x_center} {y_center} {width} {height}\n")
+
+                
 def main():
     current_directory = os.getcwd()
-    model_path = r"C:\Users\U436445\OneDrive - Danfoss\Documents\Codes\DrawingRebrand\AI_Drawing_Rebranding\version_2\runs\detect\train4\weights\best.pt"
-
+    model_path = r"C:\Users\U436445\OneDrive - Danfoss\Documents\GitHub\DrawingRebrand\best.pt"
     image_dir = os.path.join(current_directory, "ExtraImage")
     csv_output_path = os.path.join(current_directory, "detection_logs.csv")
     output_folder = os.path.join(current_directory, "OutputImages")
@@ -160,7 +180,7 @@ def main():
     
     model = load_model(model_path)
     image_paths = load_image_paths(image_dir)
-    csv_headers = ["Image", "Detections", "Confidence", "Class", "Status"]
+    csv_headers = ["Image", "Class", "X_center", "Y_center", "Width", "Height"]
     with open(csv_output_path, mode='w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(csv_headers)
@@ -175,13 +195,12 @@ def main():
             continue
 
         results = model(image_path)
-        filtered_boxes = filter_detections(results[0], confidence_threshold=0.3)
+        filtered_boxes = filter_detections(results[0], confidence_threshold=0.5)
         if not filtered_boxes:
             print(f"No detections above confidence threshold in image {image_path}")
             continue
 
-        modified_image = filter_detections(original_image.copy(), filtered_boxes)
-        save_results(modified_image, output_path, filtered_boxes, csv_output_path, image_name)
+        save_results(original_image, output_path, filtered_boxes, csv_output_path, image_name)
         print(f"Processed and saved modified image: {output_path}")
 
 if __name__ == "__main__":
